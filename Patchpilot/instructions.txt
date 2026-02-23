@@ -1,0 +1,47 @@
+# AI Assistant v1 - Setup Instructions
+
+This guide will help you get the AI Assistant up and running locally.
+
+## 1. Prerequisites
+Ensure you have **Python 3.8+** installed on your system.
+
+## 2. Installation
+First, clone the repository and navigate to the project root. Then, install the required dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+### Core Dependencies:
+- `openai`: Main client for AI interactions.
+- `prompt-toolkit`: Provides the interactive CLI with autocomplete.
+- `python-dotenv`: Loads configuration from your environment file.
+- `PyPDF2`, `python-docx`, `openpyxl`, `beautifulsoup4`: Libraries for reading various file formats.
+
+## 3. Configuration (Critical)
+The application requires an API key to function. This key should be stored in a `.env.local` file in the root directory.
+
+1.  Create a file named `.env.local` in the root folder.
+2.  Add your API key and configuration as follows:
+
+```env
+OPENAI_API_KEY=your_nvidia_or_openai_api_key_here
+AI_MODEL=z-ai/glm4.7
+AI_TEMPERATURE=0.4
+MAX_FILES=12
+```
+
+> **Note:** The `.env.local` file is already listed in `.gitignore` to prevent you from accidentally sharing your secrets on GitHub.
+
+## 4. Running the Assistant
+Once the dependencies are installed and the `.env.local` file is set up, start the assistant by running:
+
+```bash
+python main.py
+```
+
+## 5. Usage Tips
+- Type `/help` inside the app to see all available commands.
+- Use `/file <path>` to load specific code files into the AI's memory.
+- Use `/folder <path>` to load entire directories.
+- Commands like `/fix` and `/refactor` can help you edit files directly through the AI.

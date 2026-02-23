@@ -1,0 +1,11 @@
+PyPDF2
+python-docx
+openpyxl
+beautifulsoup4
+striprtf
+odfdo
+python-pptx
+python-dotenv
+openai
+httpx
+prompt-toolkit>=3.0
