@@ -1,13 +1,15 @@
 """CLI command dispatch – all command handler logic lives here."""
-from __future__ import annotations
-import textwrap
-from typing import Optional
 
-from session.manager import SessionManager
+from __future__ import annotations
+
+import textwrap
+from typing import ClassVar, Optional
+
+from cli.display import Display
+from context.manager import ContextManager
 from files.manager import FileManager
 from files.operations import PatchManager, SnippetManager
-from context.manager import ContextManager
-from cli.display import Display
+from session.manager import SessionManager
 
 HELP_TEXT = textwrap.dedent("""
 Available commands:
@@ -48,6 +50,24 @@ Anything else is sent as a regular chat message.
 
 
 class CommandDispatcher:
+    COMMAND_HANDLERS: ClassVar[dict[str, str]] = {
+        "/exit": "_cmd_exit",
+        "/help": "_cmd_help",
+        "/reset": "_cmd_reset",
+        "/tokens": "_cmd_tokens",
+        "/list": "_cmd_list",
+        "/file": "_cmd_file",
+        "/folder": "_cmd_folder",
+        "/show": "_cmd_show",
+        "/unload": "_cmd_unload",
+        "/pin": "_cmd_pin",
+        "/unpin": "_cmd_unpin",
+        "/fix": "_cmd_fix",
+        "/refactor": "_cmd_refactor",
+        "/patch": "_cmd_patch",
+        "/snippet": "_cmd_snippet",
+    }
+
     def __init__(
         self,
         session: SessionManager,
@@ -86,63 +106,13 @@ class CommandDispatcher:
         if cmd == "/exit":
             return False
 
-        if cmd == "/help":
-            self._display.info(HELP_TEXT)
-            return True
-
-        if cmd == "/reset":
-            self._session.reset()
-            self._display.info("Conversation history cleared (project files retained).")
-            return True
-
-        if cmd == "/tokens":
-            est = self._ctx.estimated_total_tokens()
-            self._display.info(f"Estimated context tokens: ~{est}")
-            return True
-
-        if cmd == "/list":
-            paths = self._files.loaded_paths()
-            if not paths:
-                self._display.info("No files loaded.")
+        if cmd in ("/unload-all", "/unload-folder", "/unload-pattern"):
+            if cmd == "/unload-all":
+                self._cmd_unload_all(parts)
+            elif cmd == "/unload-folder":
+                self._cmd_unload_folder(parts)
             else:
-                for p in paths:
-                    self._display.info(p)
-            return True
-
-        if cmd == "/file":
-            self._cmd_file(parts)
-            return True
-
-        if cmd == "/folder":
-            self._cmd_folder(parts)
-            return True
-
-        if cmd == "/show":
-            self._cmd_show(parts)
-            return True
-
-        if cmd == "/unload":
-            self._cmd_unload(parts)
-            return True
-
-        if cmd == "/unload-all":
-            self._cmd_unload_all(parts)
-            return True
-
-        if cmd == "/unload-folder":
-            self._cmd_unload_folder(parts)
-            return True
-
-        if cmd == "/unload-pattern":
-            self._cmd_unload_pattern(parts)
-            return True
-
-        if cmd == "/pin":
-            self._cmd_pin(parts)
-            return True
-
-        if cmd == "/unpin":
-            self._cmd_unpin(parts)
+                self._cmd_unload_pattern(parts)
             return True
 
         if cmd == "/context-info":
@@ -153,15 +123,37 @@ class CommandDispatcher:
             self._cmd_code_op(cmd, raw)
             return True
 
-        if cmd == "/snippet":
-            self._cmd_snippet(parts)
+        handler = self.COMMAND_HANDLERS.get(cmd)
+        if handler:
+            getattr(self, handler)(parts)
             return True
 
-        # Default: chat message
         self._display.assistant_header()
         response = self._session.send(raw, record_in_history=True)
         self._last_response = response
         return True
+
+    def _cmd_exit(self, parts: list[str]) -> None:
+        pass
+
+    def _cmd_help(self, parts: list[str]) -> None:
+        self._display.info(HELP_TEXT)
+
+    def _cmd_reset(self, parts: list[str]) -> None:
+        self._session.reset()
+        self._display.info("Conversation history cleared (project files retained).")
+
+    def _cmd_tokens(self, parts: list[str]) -> None:
+        est = self._ctx.estimated_total_tokens()
+        self._display.info(f"Estimated context tokens: ~{est}")
+
+    def _cmd_list(self, parts: list[str]) -> None:
+        paths = self._files.loaded_paths()
+        if not paths:
+            self._display.info("No files loaded.")
+        else:
+            for p in paths:
+                self._display.info(p)
 
     # ------------------------------------------------------------------
     # State Getters for Autocomplete
@@ -170,10 +162,25 @@ class CommandDispatcher:
     def get_all_commands(self) -> list[str]:
         """Return all top-level commands starting with /."""
         return [
-            "/exit", "/reset", "/help", "/file", "/folder", "/list", "/show",
-            "/unload", "/unload-all", "/unload-folder", "/unload-pattern",
-            "/pin", "/unpin", "/tokens", "/context-info", "/fix", "/refactor",
-            "/patch", "/snippet"
+            "/exit",
+            "/reset",
+            "/help",
+            "/file",
+            "/folder",
+            "/list",
+            "/show",
+            "/unload",
+            "/unload-all",
+            "/unload-folder",
+            "/unload-pattern",
+            "/pin",
+            "/unpin",
+            "/tokens",
+            "/context-info",
+            "/fix",
+            "/refactor",
+            "/patch",
+            "/snippet",
         ]
 
     def get_loaded_paths(self) -> list[str]:
@@ -202,6 +209,7 @@ class CommandDispatcher:
     def _cmd_folder(self, parts: list[str]) -> None:
         folder = parts[1] if len(parts) > 1 else "."
         import os
+
         if not os.path.isdir(folder):
             self._display.error(f"Folder not found: {folder}")
             return
@@ -221,7 +229,11 @@ class CommandDispatcher:
             return
         # truncate for display
         max_chars = self._max_file_chars * 4
-        display_content = content if len(content) <= max_chars else content[:max_chars] + "\n…[truncated]"
+        display_content = (
+            content
+            if len(content) <= max_chars
+            else content[:max_chars] + "\n…[truncated]"
+        )
         self._display.info(f"\n--- {path} ---\n")
         self._display.info(display_content)
         self._display.info("\n--- end ---")
@@ -277,8 +289,12 @@ class CommandDispatcher:
 
     def _cmd_context_info(self) -> None:
         stats = self._ctx.get_stats()
-        self._display.info(f"Total tokens: {stats['total_tokens']} / {stats['max_total']}")
-        self._display.info(f"Loaded files: {stats['file_count']} ({stats['pinned_count']} pinned)")
+        self._display.info(
+            f"Total tokens: {stats['total_tokens']} / {stats['max_total']}"
+        )
+        self._display.info(
+            f"Loaded files: {stats['file_count']} ({stats['pinned_count']} pinned)"
+        )
         self._display.newline()
 
         headers = ["File", "Tokens", "Pinned"]
@@ -334,21 +350,23 @@ class CommandDispatcher:
     def _build_code_prompt(cmd: str, path: str, content: str, instructions: str) -> str:
         if cmd == "/fix":
             return (
-                f"Fix bugs or errors in this file. Follow these instructions: {instructions}\n\n"
-                f"File: {path}\n{content}\n\n"
-                "Provide a clear explanation of the changes and a complete replacement file "
-                "in a single fenced code block."
+                f"Fix bugs or errors in this file. Follow these instructions: "
+                f"{instructions}\n\nFile: {path}\n{content}\n\n"
+                "Provide a clear explanation of the changes and a complete "
+                "replacement file in a single fenced code block."
             )
         elif cmd == "/refactor":
             return (
-                f"Refactor this file to improve readability, maintainability, or performance "
-                f"according to: {instructions}\n\nFile: {path}\n{content}\n\n"
-                "Provide a short summary and the full refactored file in a single fenced code block."
+                f"Refactor this file to improve readability, maintainability, "
+                f"or performance according to: {instructions}\n\n"
+                f"File: {path}\n{content}\n\n"
+                "Provide a short summary and the full refactored file in a "
+                "single fenced code block."
             )
         else:  # /patch
             return (
-                f"Produce a patch (complete replacement) for this file according to: {instructions}\n\n"
-                f"File: {path}\n{content}\n\n"
+                f"Produce a patch (complete replacement) for this file according "
+                f"to: {instructions}\n\nFile: {path}\n{content}\n\n"
                 "Provide only the replacement file in a single fenced code block."
             )
 

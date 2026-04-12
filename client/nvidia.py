@@ -1,9 +1,11 @@
 """NVIDIA Build API / OpenAI-compatible provider."""
-from __future__ import annotations
-import time
-from typing import Iterator
 
-from openai import OpenAI, APIError, APIConnectionError, RateLimitError
+from __future__ import annotations
+
+import time
+from typing import Any, Iterator
+
+from openai import APIConnectionError, APIError, OpenAI, RateLimitError
 
 from .base import ModelProvider, StreamChunk
 
@@ -37,7 +39,7 @@ class NvidiaProvider(ModelProvider):
             try:
                 completion = self._client.chat.completions.create(
                     model=self._model,
-                    messages=messages,
+                    messages=messages,  # type: ignore
                     temperature=temperature,
                     max_tokens=max_tokens,
                     extra_body={
@@ -52,15 +54,20 @@ class NvidiaProvider(ModelProvider):
                 return
             except (APIConnectionError, RateLimitError) as e:
                 last_exc = e
-                wait = self._retry_delay * (2 ** attempt)
-                print(f"\n[Retry {attempt + 1}/{self._max_retries}] {e}. Waiting {wait:.1f}s…")
+                wait = self._retry_delay * (2**attempt)
+                print(
+                    f"\n[Retry {attempt + 1}/{self._max_retries}] {e}. "
+                    f"Waiting {wait:.1f}s…"
+                )
                 time.sleep(wait)
             except APIError as e:
                 raise RuntimeError(f"API error: {e}") from e
-        raise RuntimeError(f"All {self._max_retries} retries failed: {last_exc}") from last_exc
+        raise RuntimeError(
+            f"All {self._max_retries} retries failed: {last_exc}"
+        ) from last_exc
 
     @staticmethod
-    def _parse_stream(completion) -> Iterator[StreamChunk]:
+    def _parse_stream(completion: Any) -> Iterator[StreamChunk]:
         for chunk in completion:
             if not getattr(chunk, "choices", None):
                 continue
@@ -95,15 +102,16 @@ class OllamaProvider(ModelProvider):
     ) -> Iterator[StreamChunk]:
         completion = self._client.chat.completions.create(
             model=self._model,
-            messages=messages,
+            messages=messages,  # type: ignore
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
         )
         for chunk in completion:
-            if not getattr(chunk, "choices", None):
+            choices = getattr(chunk, "choices", None)
+            if not choices:
                 continue
-            delta = chunk.choices[0].delta
+            delta = choices[0].delta
             content = getattr(delta, "content", None) or ""
             if content:
                 yield StreamChunk(content=content)

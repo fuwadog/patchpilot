@@ -15,7 +15,6 @@
 
 </div>
 
-
 ## 🎯 Overview
 
 **PatchPilot is not just another chatbot wrapper.**
@@ -38,12 +37,12 @@ It's a terminal-native AI orchestration engine designed for real development wor
 
 PatchPilot automatically extracts and prepares content from various file formats for LLM reasoning:
 
-| Category | Supported Formats |
-|----------|------------------|
-| **Code** | `.py` `.js` `.ts` `.html` `.css` `.json` |
-| **Documents** | `.pdf` `.docx` `.rtf` `.odt` |
-| **Data** | `.xlsx` `.csv` |
-| **Presentations** | `.pptx` |
+| Category          | Supported Formats                        |
+| ----------------- | ---------------------------------------- |
+| **Code**          | `.py` `.js` `.ts` `.html` `.css` `.json` |
+| **Documents**     | `.pdf` `.docx` `.rtf` `.odt`             |
+| **Data**          | `.xlsx` `.csv`                           |
+| **Presentations** | `.pptx`                                  |
 
 ### 🧠 Context-Aware Memory System
 
@@ -55,13 +54,13 @@ PatchPilot automatically extracts and prepares content from various file formats
 
 ### 🤖 AI-Driven Code Operations
 
-| Command | Description | Use Case |
-|---------|-------------|----------|
-| `/fix` | Detect and repair bugs | Find logical errors, syntax issues |
-| `/refactor` | Improve code structure | Optimize readability, performance |
-| `/patch` | Generate and apply edits | Apply AI-suggested changes |
-| `/pin` | Lock file in context | Maintain focus on key files |
-| `/tokens` | Inspect token usage | Monitor context consumption |
+| Command     | Description              | Use Case                           |
+| ----------- | ------------------------ | ---------------------------------- |
+| `/fix`      | Detect and repair bugs   | Find logical errors, syntax issues |
+| `/refactor` | Improve code structure   | Optimize readability, performance  |
+| `/patch`    | Generate and apply edits | Apply AI-suggested changes         |
+| `/pin`      | Lock file in context     | Maintain focus on key files        |
+| `/tokens`   | Inspect token usage      | Monitor context consumption        |
 
 **Patch Preview System** - Review all changes before applying them to your codebase.
 
@@ -73,15 +72,15 @@ PatchPilot automatically extracts and prepares content from various file formats
 
 ## 🔧 Tech Stack
 
-| Category | Technologies |
-|----------|-------------|
-| **Core** | Python 3.x, prompt-toolkit |
-| **LLM Integration** | openai SDK, httpx |
+| Category                | Technologies                  |
+| ----------------------- | ----------------------------- |
+| **Core**                | Python 3.x, prompt-toolkit    |
+| **LLM Integration**     | openai SDK, httpx             |
 | **Document Processing** | PyPDF2, python-docx, openpyxl |
-| **Presentations** | python-pptx |
-| **Web Parsing** | beautifulsoup4 |
-| **Office Formats** | odfdo, striprtf |
-| **Configuration** | python-dotenv |
+| **Presentations**       | python-pptx                   |
+| **Web Parsing**         | beautifulsoup4                |
+| **Office Formats**      | odfdo, striprtf               |
+| **Configuration**       | python-dotenv                 |
 
 ---
 
@@ -89,13 +88,13 @@ PatchPilot automatically extracts and prepares content from various file formats
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.10 or higher (Python 3.14 recommended)
 - pip package manager
 - Git
 
 ### Quick Start
 
-```bash
+```powershell
 # Clone the repository
 git clone https://github.com/fuwadog/patchpilot.git
 cd patchpilot
@@ -103,20 +102,31 @@ cd patchpilot
 # Create virtual environment
 python -m venv venv
 
-# Activate virtual environment
-# On Windows:
-venv\Scripts\activate
-# On macOS/Linux:
-source venv/bin/activate
+# Activate virtual environment (PowerShell)
+venv\Scripts\Activate.ps1
+# Or (Command Prompt):
+venv\Scripts\activate.bat
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Copy environment template
-cp .env.example .env
-
+# Create environment file (if .env.example doesn't exist)
+if not exist .env.example (
+    echo # API Configuration > .env
+    echo API_KEY=your_api_key_here >> .env
+    echo BASE_URL=https://api.nvidia.com/v1 >> .env
+    echo MODEL_NAME=nv-llama-3-70b-instruct >> .env
+    echo. >> .env
+    echo # Model Parameters >> .env
+    echo MAX_TOKENS=4096 >> .env
+    echo TEMPERATURE=0.3 >> .env
+    echo. >> .env
+    echo # Context Management >> .env
+    echo MAX_CONTEXT_TOKENS=8000 >> .env
+    echo PINNED_FILES_LIMIT=5 >> .env
+)
 # Edit .env with your credentials
-nano .env  # or use your preferred editor
+notepad .env  # or use your preferred editor
 ```
 
 ---
@@ -231,6 +241,7 @@ python main.py
 ```
 
 **Result:**
+
 - ✅ Code analyzed for improvements
 - ✅ Refactoring suggestions generated
 - ✅ Changes previewed before applying

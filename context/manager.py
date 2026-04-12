@@ -1,8 +1,10 @@
 """Token-aware context management."""
+
 from __future__ import annotations
-from dataclasses import dataclass, field
+
 import os
-from typing import Optional, SupportsIndex
+from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -28,7 +30,13 @@ class ContextManager:
     Applies a token budget to keep total context within limits.
     """
 
-    def __init__(self, system_prompt: str, max_total_tokens: int, max_file_tokens: int, max_convo_messages: int):
+    def __init__(
+        self,
+        system_prompt: str,
+        max_total_tokens: int,
+        max_file_tokens: int,
+        max_convo_messages: int,
+    ):
         self._system = Message("system", system_prompt)
         self._max_total = max_total_tokens
         self._max_file_tokens = max_file_tokens
@@ -44,7 +52,9 @@ class ContextManager:
     def upsert_file(self, path: str, content: str) -> None:
         tag = f"[PROJECT_FILE] {path}"
         # Remove existing entry for this path
-        self._file_messages = [m for m in self._file_messages if not m.content.startswith(tag + "\n")]
+        self._file_messages = [
+            m for m in self._file_messages if not m.content.startswith(tag + "\n")
+        ]
         budgeted = self._apply_file_budget(content)
         self._file_messages.append(Message("user", f"{tag}\n{budgeted}"))
 
@@ -58,7 +68,9 @@ class ContextManager:
             return False
 
         tag = f"[PROJECT_FILE] {path}"
-        self._file_messages = [m for m in self._file_messages if not m.content.startswith(tag + "\n")]
+        self._file_messages = [
+            m for m in self._file_messages if not m.content.startswith(tag + "\n")
+        ]
         self._pinned_files.discard(path)
         return True
 
@@ -69,7 +81,7 @@ class ContextManager:
             return content
         half = max_chars // 2
         head = content[:half]
-        tail = content[-(half - 100):]
+        tail = content[-(half - 100) :]
         return head + "\n\n/* ...TRUNCATED... (tail follows) */\n\n" + tail
 
     # ------------------------------------------------------------------
@@ -86,7 +98,7 @@ class ContextManager:
 
     def _trim_convo(self) -> None:
         if len(self._convo_messages) > self._max_convo:
-            self._convo_messages = self._convo_messages[-self._max_convo:]
+            self._convo_messages = self._convo_messages[-self._max_convo :]
 
     def reset_convo(self) -> None:
         self._convo_messages.clear()
@@ -95,13 +107,17 @@ class ContextManager:
     # Build final message list with total-token enforcement
     # ------------------------------------------------------------------
 
-    def build_messages(self, ephemeral_user_content: Optional[str] = None) -> list[dict]:
+    def build_messages(
+        self, ephemeral_user_content: Optional[str] = None
+    ) -> list[dict]:
         """
         Assembles: system + files + convo + optional ephemeral user message.
         Drops oldest convo messages if total token budget is exceeded.
         Falls back to shrinking file content if still over budget.
         """
-        ephemeral = [Message("user", ephemeral_user_content)] if ephemeral_user_content else []
+        ephemeral = (
+            [Message("user", ephemeral_user_content)] if ephemeral_user_content else []
+        )
 
         def total_tokens(convo: list[Message]) -> int:
             return (
@@ -120,7 +136,10 @@ class ContextManager:
         file_msgs = list(self._file_messages)
         if total_tokens(convo) > self._max_total:
             file_msgs = [
-                Message(m.role, self._apply_file_budget(m.content[: self._max_file_tokens * 2]))
+                Message(
+                    m.role,
+                    self._apply_file_budget(m.content[: self._max_file_tokens * 2]),
+                )
                 for m in file_msgs
             ]
 
@@ -136,7 +155,7 @@ class ContextManager:
         for m in self._file_messages:
             first_line = m.content.split("\n", 1)[0]
             if first_line.startswith("[PROJECT_FILE] "):
-                paths.append(first_line[len("[PROJECT_FILE] "):])
+                paths.append(first_line[len("[PROJECT_FILE] ") :])
         return paths
 
     def estimated_total_tokens(self) -> int:
@@ -153,7 +172,10 @@ class ContextManager:
     def pin_file(self, path: str) -> bool:
         """Mark a file as pinned. File must be loaded first."""
         path = os.path.abspath(path)
-        if any(m.content.startswith(f"[PROJECT_FILE] {path}\n") for m in self._file_messages):
+        if any(
+            m.content.startswith(f"[PROJECT_FILE] {path}\n")
+            for m in self._file_messages
+        ):
             self._pinned_files.add(path)
             return True
         return False
@@ -170,12 +192,14 @@ class ContextManager:
         for m in self._file_messages:
             tag = "[PROJECT_FILE] "
             if m.content.startswith(tag):
-                path = m.content.split("\n", 1)[0][len(tag):]
-                file_stats.append({
-                    "path": path,
-                    "tokens": m.token_estimate(),
-                    "pinned": path in self._pinned_files
-                })
+                path = m.content.split("\n", 1)[0][len(tag) :]
+                file_stats.append(
+                    {
+                        "path": path,
+                        "tokens": m.token_estimate(),
+                        "pinned": path in self._pinned_files,
+                    }
+                )
 
         return {
             "total_tokens": self.estimated_total_tokens(),
@@ -183,5 +207,5 @@ class ContextManager:
             "file_count": len(self._file_messages),
             "pinned_count": len(self._pinned_files),
             "convo_messages": len(self._convo_messages),
-            "files": file_stats
+            "files": file_stats,
         }

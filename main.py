@@ -7,23 +7,26 @@ All business logic lives in the modules below. This file only:
 2. Wires components together
 3. Runs the input loop
 """
+
 from __future__ import annotations
-import sys
+
 import os
+import sys
 
 # Make package imports work when running from the project root
 sys.path.insert(0, os.path.dirname(__file__))
 
-from config import Config
+from prompt_toolkit import prompt
+
+from cli.autocomplete import setup_autocomplete
+from cli.commands import CommandDispatcher
+from cli.display import Display
 from client.nvidia import NvidiaProvider
+from config import Config
 from context.manager import ContextManager
-from session.manager import SessionManager
 from files.manager import FileManager
 from files.operations import PatchManager, SnippetManager
-from cli.display import Display
-from cli.commands import CommandDispatcher
-from cli.autocomplete import setup_autocomplete
-from prompt_toolkit import prompt
+from session.manager import SessionManager
 
 
 def resolve_api_key(cfg: Config) -> str:

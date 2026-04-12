@@ -44,6 +44,13 @@ coverage.xml
 *.cover
 *.py,cover
 
+# Python - Linters and type checkers
+.ruff_cache/
+.mypy_cache/
+.pytype/
+.pyanalyze/
+.bandit/
+
 # IDE files
 .vscode/
 .idea/

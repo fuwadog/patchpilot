@@ -1,5 +1,7 @@
 """Safe file operations: atomic writes, backups, unified diff preview."""
+
 from __future__ import annotations
+
 import difflib
 import os
 import re
@@ -18,7 +20,9 @@ class PatchManager:
     4. Atomic write (temp file + rename)
     """
 
-    def __init__(self, backup: bool = True, diff_preview: bool = True, backup_count: int = 5):
+    def __init__(
+        self, backup: bool = True, diff_preview: bool = True, backup_count: int = 5
+    ):
         self._backup = backup
         self._diff_preview = diff_preview
         self._backup_count = backup_count
@@ -37,7 +41,9 @@ class PatchManager:
         match = re.search(pattern, model_response, re.DOTALL)
         return match.group(1).rstrip("\n") if match else None
 
-    def apply(self, path: str, new_content: str, confirm: bool = True, dry_run: bool = False) -> tuple[bool, str]:
+    def apply(
+        self, path: str, new_content: str, confirm: bool = True, dry_run: bool = False
+    ) -> tuple[bool, str]:
         """
         Write new_content to path safely.
         Returns (success, message).
@@ -77,14 +83,18 @@ class PatchManager:
                 return fh.read()
         except FileNotFoundError:
             return None
-        except Exception as exc:
+        except Exception:
             return None
 
     @staticmethod
     def _show_diff(path: str, old: str, new: str) -> None:
         old_lines = old.splitlines(keepends=True)
         new_lines = new.splitlines(keepends=True)
-        diff = list(difflib.unified_diff(old_lines, new_lines, fromfile=f"a/{path}", tofile=f"b/{path}"))
+        diff = list(
+            difflib.unified_diff(
+                old_lines, new_lines, fromfile=f"a/{path}", tofile=f"b/{path}"
+            )
+        )
         if not diff:
             print("  (No changes detected in diff)")
             return
@@ -113,18 +123,23 @@ class PatchManager:
         shutil.copy2(path, backup)
 
         # Rotation
-        backups = sorted([
-            os.path.join(self._backup_dir, f)
-            for f in os.listdir(self._backup_dir)
-            if f.startswith(base) and f.endswith(".bak")
-        ], key=os.path.getmtime)
+        backups = sorted(
+            [
+                os.path.join(self._backup_dir, f)
+                for f in os.listdir(self._backup_dir)
+                if f.startswith(base) and f.endswith(".bak")
+            ],
+            key=os.path.getmtime,
+        )
 
         while len(backups) > self._backup_count:
             oldest = backups.pop(0)
             try:
                 os.remove(oldest)
-            except Exception:
-                pass
+            except Exception as exc:
+                import logging
+
+                logging.warning(f"Failed to remove backup {oldest}: {exc}")
 
         return backup
 

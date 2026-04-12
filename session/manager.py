@@ -1,10 +1,12 @@
 """Session manager – orchestrates provider streaming and conversation history."""
+
 from __future__ import annotations
+
 from typing import Optional
 
+from cli.display import Display
 from client.base import ModelProvider
 from context.manager import ContextManager
-from cli.display import Display
 
 
 class SessionManager:
@@ -48,7 +50,9 @@ class SessionManager:
 
         full_response = ""
         try:
-            for chunk in self._provider.stream(messages, self._temperature, self._max_tokens):
+            for chunk in self._provider.stream(
+                messages, self._temperature, self._max_tokens
+            ):
                 if chunk.reasoning:
                     self._display.reasoning(chunk.reasoning)
                 if chunk.content:

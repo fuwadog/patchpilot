@@ -1,5 +1,7 @@
 """Terminal display helpers."""
+
 from __future__ import annotations
+
 import os
 import sys
 
@@ -7,7 +9,8 @@ import sys
 class Display:
     """Centralises all terminal output so the rest of the app stays I/O-free."""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize display with TTY-aware ANSI color codes."""
         self._tty = sys.stdout.isatty() and os.getenv("NO_COLOR") is None
         self._DIM = "\033[90m" if self._tty else ""
         self._RED = "\033[31m" if self._tty else ""

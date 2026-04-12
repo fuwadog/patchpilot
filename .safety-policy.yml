@@ -1,0 +1,27 @@
+# Safety Policy Configuration
+# ============================
+# This file ignores vulnerabilities detected by Safety that are NOT from
+# PatchPilot's direct dependencies (requirements.txt or requirements-dev.txt).
+#
+# The following vulnerabilities were flagged by Safety but are FALSE POSITIVES:
+# - gunicorn 23.0.0 (CVE-2024-1135) - NOT a direct dependency of PatchPilot
+# - fastapi-sso 0.16.0 (CVE-2025-14546) - NOT a direct dependency of PatchPilot
+# - fastapi-sso 0.16.0 (PVE-2025-82878) - NOT a direct dependency of PatchPilot
+#
+# These are transitive dependencies from OTHER projects in the global Python
+# environment, not from PatchPilot itself.
+#
+# PatchPilot only uses:
+# - requirements.txt: pypdf, python-docx, openpyxl, beautifulsoup4, striprtf, odfdo,
+#                     python-pptx, python-dotenv, openai, httpx, prompt-toolkit
+# - requirements-dev.txt: ruff, mypy, bandit, safety, pytest, black, isort, pytest-cov
+# None of the above CVEs apply to these packages.
+
+security:
+  ignore-cves:
+    CVE-2024-1135:
+      reason: "gunicorn is not a dependency of PatchPilot - false positive from global environment"
+    CVE-2025-14546:
+      reason: "fastapi-sso is not a dependency of PatchPilot - false positive from global environment"
+    PVE-2025-82878:
+      reason: "fastapi-sso is not a dependency of PatchPilot - false positive from global environment"

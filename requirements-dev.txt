@@ -1,0 +1,9 @@
+# Development dependencies for linting, testing, and security
+ruff
+mypy
+bandit
+safety
+pytest
+black
+isort
+pytest-cov

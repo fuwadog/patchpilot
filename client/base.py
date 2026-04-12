@@ -1,7 +1,9 @@
 """Abstract model provider interface."""
+
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Iterator, Optional
+from typing import Iterator
 
 
 class StreamChunk:

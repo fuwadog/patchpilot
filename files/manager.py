@@ -1,9 +1,11 @@
-"""File manager – loads and tracks project files in context with support for multiple file types."""
+"""File manager – loads and tracks project files in context."""
+
 from __future__ import annotations
+
 import glob
-import os
-from typing import Optional
 import mimetypes
+import os
+from typing import ClassVar, Optional
 
 from context.manager import ContextManager
 
@@ -15,13 +17,46 @@ class FileManager:
     Delegates context injection to ContextManager.
     """
 
-    def __init__(self, context: ContextManager, max_files: int, default_extensions: list[str]):
+    FILE_READERS: ClassVar[dict[str, str]] = {
+        ".pdf": "_read_pdf",
+        ".docx": "_read_word",
+        ".doc": "_read_word",
+        ".xlsx": "_read_excel",
+        ".xls": "_read_excel",
+        ".xlsm": "_read_excel",
+        ".csv": "_read_csv",
+        ".json": "_read_json",
+        ".xml": "_read_xml",
+        ".html": "_read_html",
+        ".htm": "_read_html",
+        ".xhtml": "_read_html",
+        ".rtf": "_read_rtf",
+        ".odt": "_read_odt",
+        ".pptx": "_read_powerpoint",
+        ".ppt": "_read_powerpoint",
+    }
+
+    TEXT_EXTENSIONS: ClassVar[set[str]] = {
+        ".md",
+        ".markdown",
+        ".rst",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".ini",
+        ".cfg",
+        ".conf",
+    }
+
+    def __init__(
+        self, context: ContextManager, max_files: int, default_extensions: list[str]
+    ):
         self._ctx = context
         self._max_files = max_files
         self._extensions = default_extensions
         # path -> full raw content (for patch generation etc.)
         self._store: dict[str, str] = {}
-        
+
         # Initialize mimetypes
         mimetypes.init()
 
@@ -35,13 +70,15 @@ class FileManager:
         content, err = self._read(path)
         if err:
             return False, err
+        if content is None:
+            return False, "No content read from file"
         self._store[path] = content
         self._ctx.upsert_file(path, content)
         return True, None
 
     def unload(self, path: str, force: bool = False) -> bool:
         """
-        Unload a single file. 
+        Unload a single file.
         Returns True if successful, False if skipped (e.g. pinned).
         """
         path = os.path.abspath(path)
@@ -73,10 +110,13 @@ class FileManager:
     def unload_pattern(self, pattern: str) -> int:
         """Unload files matching a glob pattern."""
         import fnmatch
+
         paths = list(self._store.keys())
         count = 0
         for p in paths:
-            if fnmatch.fnmatch(os.path.basename(p), pattern) or fnmatch.fnmatch(p, pattern):
+            if fnmatch.fnmatch(os.path.basename(p), pattern) or fnmatch.fnmatch(
+                p, pattern
+            ):
                 if self.unload(p):
                     count += 1
         return count
@@ -136,47 +176,20 @@ class FileManager:
         """
         if not os.path.exists(path):
             return None, "File not found."
-        
+
         try:
-            # Get file extension
             _, ext = os.path.splitext(path)
             ext = ext.lower()
-            
-            # Route to appropriate reader based on file type
-            if ext in ['.pdf']:
-                return self._read_pdf(path)
-            elif ext in ['.docx', '.doc']:
-                return self._read_word(path)
-            elif ext in ['.xlsx', '.xls', '.xlsm']:
-                return self._read_excel(path)
-            elif ext in ['.csv']:
-                return self._read_csv(path)
-            elif ext in ['.json']:
-                return self._read_json(path)
-            elif ext in ['.xml']:
-                return self._read_xml(path)
-            elif ext in ['.md', '.markdown']:
+
+            reader = self.FILE_READERS.get(ext)
+            if reader:
+                return getattr(self, reader)(path)  # type: ignore[no-any-return]
+
+            if ext in self.TEXT_EXTENSIONS or ext not in self.FILE_READERS:
                 return self._read_text(path)
-            elif ext in ['.rst']:
-                return self._read_text(path)
-            elif ext in ['.yaml', '.yml']:
-                return self._read_text(path)
-            elif ext in ['.toml']:
-                return self._read_text(path)
-            elif ext in ['.ini', '.cfg', '.conf']:
-                return self._read_text(path)
-            elif ext in ['.html', '.htm', '.xhtml']:
-                return self._read_html(path)
-            elif ext in ['.rtf']:
-                return self._read_rtf(path)
-            elif ext in ['.odt']:
-                return self._read_odt(path)
-            elif ext in ['.pptx', '.ppt']:
-                return self._read_powerpoint(path)
-            else:
-                # Try to read as text file for code and plain text
-                return self._read_text(path)
-                
+
+            return self._read_text(path)
+
         except Exception as exc:
             return None, f"Read error: {exc}"
 
@@ -188,11 +201,11 @@ class FileManager:
                 return fh.read(), None
         except UnicodeDecodeError:
             # Try with different encodings
-            for encoding in ['latin-1', 'cp1252', 'iso-8859-1']:
+            for encoding in ["latin-1", "cp1252", "iso-8859-1"]:
                 try:
                     with open(path, "r", encoding=encoding) as fh:
                         return fh.read(), None
-                except:
+                except UnicodeDecodeError:
                     continue
             return None, "Unable to decode file with common encodings"
         except Exception as exc:
@@ -202,16 +215,19 @@ class FileManager:
     def _read_pdf(path: str) -> tuple[Optional[str], Optional[str]]:
         """Extract text from PDF files."""
         try:
-            import PyPDF2
+            import pypdf  # type: ignore[import-not-found]
+
             text_content = []
-            with open(path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
+            with open(path, "rb") as file:
+                pdf_reader = pypdf.PdfReader(file)
                 for page_num in range(len(pdf_reader.pages)):
                     page = pdf_reader.pages[page_num]
-                    text_content.append(f"--- Page {page_num + 1} ---\n{page.extract_text()}")
+                    text_content.append(
+                        f"--- Page {page_num + 1} ---\n{page.extract_text()}"
+                    )
             return "\n\n".join(text_content), None
         except ImportError:
-            return None, "PyPDF2 not installed. Install with: pip install PyPDF2"
+            return None, "pypdf not installed. Install with: pip install pypdf"
         except Exception as exc:
             return None, f"PDF read error: {exc}"
 
@@ -219,15 +235,16 @@ class FileManager:
     def _read_word(path: str) -> tuple[Optional[str], Optional[str]]:
         """Extract text from Word documents (.docx, .doc)."""
         try:
-            import docx
+            import docx  # type: ignore[import-not-found]
+
             doc = docx.Document(path)
             text_content = []
-            
+
             # Extract paragraphs
             for para in doc.paragraphs:
                 if para.text.strip():
                     text_content.append(para.text)
-            
+
             # Extract tables
             for table in doc.tables:
                 table_text = []
@@ -235,11 +252,16 @@ class FileManager:
                     row_text = " | ".join(cell.text.strip() for cell in row.cells)
                     table_text.append(row_text)
                 if table_text:
-                    text_content.append("\n[TABLE]\n" + "\n".join(table_text) + "\n[/TABLE]\n")
-            
+                    text_content.append(
+                        "\n[TABLE]\n" + "\n".join(table_text) + "\n[/TABLE]\n"
+                    )
+
             return "\n\n".join(text_content), None
         except ImportError:
-            return None, "python-docx not installed. Install with: pip install python-docx"
+            return (
+                None,
+                "python-docx not installed. Install with: pip install python-docx",
+            )
         except Exception as exc:
             return None, f"Word document read error: {exc}"
 
@@ -248,20 +270,23 @@ class FileManager:
         """Extract data from Excel files (.xlsx, .xls)."""
         try:
             import openpyxl
+
             workbook = openpyxl.load_workbook(path, data_only=True)
             text_content = []
-            
+
             for sheet_name in workbook.sheetnames:
                 sheet = workbook[sheet_name]
                 text_content.append(f"=== Sheet: {sheet_name} ===")
-                
+
                 for row in sheet.iter_rows(values_only=True):
                     # Filter out completely empty rows
                     if any(cell is not None for cell in row):
-                        row_text = " | ".join(str(cell) if cell is not None else "" for cell in row)
+                        row_text = " | ".join(
+                            str(cell) if cell is not None else "" for cell in row
+                        )
                         text_content.append(row_text)
                 text_content.append("")  # Empty line between sheets
-            
+
             return "\n".join(text_content), None
         except ImportError:
             return None, "openpyxl not installed. Install with: pip install openpyxl"
@@ -273,8 +298,9 @@ class FileManager:
         """Read CSV files."""
         try:
             import csv
+
             text_content = []
-            with open(path, 'r', encoding='utf-8', newline='') as file:
+            with open(path, "r", encoding="utf-8", newline="") as file:
                 csv_reader = csv.reader(file)
                 for row in csv_reader:
                     text_content.append(" | ".join(row))
@@ -287,7 +313,8 @@ class FileManager:
         """Read and pretty-print JSON files."""
         try:
             import json
-            with open(path, 'r', encoding='utf-8') as file:
+
+            with open(path, "r", encoding="utf-8") as file:
                 data = json.load(file)
                 return json.dumps(data, indent=2, ensure_ascii=False), None
         except Exception as exc:
@@ -297,11 +324,12 @@ class FileManager:
     def _read_xml(path: str) -> tuple[Optional[str], Optional[str]]:
         """Read XML files."""
         try:
-            import xml.etree.ElementTree as ET
+            from defusedxml import ElementTree as ET  # type: ignore[import-untyped]
+
             tree = ET.parse(path)
             root = tree.getroot()
             # Return the XML as formatted string
-            return ET.tostring(root, encoding='unicode', method='xml'), None
+            return ET.tostring(root, encoding="unicode", method="xml"), None
         except Exception as exc:
             return None, f"XML read error: {exc}"
 
@@ -310,16 +338,19 @@ class FileManager:
         """Extract text from HTML files."""
         try:
             from bs4 import BeautifulSoup
-            with open(path, 'r', encoding='utf-8') as file:
-                soup = BeautifulSoup(file.read(), 'html.parser')
+
+            with open(path, "r", encoding="utf-8") as file:
+                soup = BeautifulSoup(file.read(), "html.parser")
                 # Remove script and style elements
                 for script in soup(["script", "style"]):
                     script.decompose()
                 text = soup.get_text()
                 # Clean up whitespace
                 lines = (line.strip() for line in text.splitlines())
-                chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-                text = '\n'.join(chunk for chunk in chunks if chunk)
+                chunks = (
+                    phrase.strip() for line in lines for phrase in line.split("  ")
+                )
+                text = "\n".join(chunk for chunk in chunks if chunk)
                 return text, None
         except ImportError:
             # Fallback to reading as plain text if BeautifulSoup not available
@@ -331,8 +362,9 @@ class FileManager:
     def _read_rtf(path: str) -> tuple[Optional[str], Optional[str]]:
         """Extract text from RTF files."""
         try:
-            from striprtf.striprtf import rtf_to_text
-            with open(path, 'r', encoding='utf-8') as file:
+            from striprtf.striprtf import rtf_to_text  # type: ignore[import-not-found]
+
+            with open(path, "r", encoding="utf-8") as file:
                 rtf_content = file.read()
                 text = rtf_to_text(rtf_content)
                 return text, None
@@ -345,7 +377,8 @@ class FileManager:
     def _read_odt(path: str) -> tuple[Optional[str], Optional[str]]:
         """Extract text from ODT (OpenDocument Text) files."""
         try:
-            from odfdo import Document
+            from odfdo import Document  # type: ignore[import-not-found]
+
             doc = Document(path)
             text_content = []
             for paragraph in doc.body.paragraphs:
@@ -360,19 +393,23 @@ class FileManager:
     def _read_powerpoint(path: str) -> tuple[Optional[str], Optional[str]]:
         """Extract text from PowerPoint files."""
         try:
-            from pptx import Presentation
+            from pptx import Presentation  # type: ignore[import-not-found]
+
             prs = Presentation(path)
             text_content = []
-            
+
             for slide_num, slide in enumerate(prs.slides, 1):
                 text_content.append(f"=== Slide {slide_num} ===")
                 for shape in slide.shapes:
                     if hasattr(shape, "text") and shape.text.strip():
                         text_content.append(shape.text)
                 text_content.append("")  # Empty line between slides
-            
+
             return "\n".join(text_content), None
         except ImportError:
-            return None, "python-pptx not installed. Install with: pip install python-pptx"
+            return (
+                None,
+                "python-pptx not installed. Install with: pip install python-pptx",
+            )
         except Exception as exc:
             return None, f"PowerPoint read error: {exc}"
