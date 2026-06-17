@@ -1,4 +1,4 @@
-.PHONY: lint typecheck security test format
+.PHONY: lint typecheck security test format clean
 
 # Install development dependencies
 install-dev:
@@ -6,34 +6,32 @@ install-dev:
 
 # Run all linters
 lint:
-	ruff .
-	# Also run flake8 if preferred
-	# flake8 .
+	ruff src/
 
 # Run type checking
 typecheck:
-	mypy .
+	mypy src/
 
 # Run security checks
 security:
-	bandit -r .
+	bandit -r src/
 	safety check
 
 # Run tests (if any)
 test:
-	pytest --cov=.
+	pytest --cov=src/ --cov-report=term-missing
 
 # Format code
 format:
-	black .
-	isort .
+	black src/
+	isort src/
 
 # Run all checks in CI/CD
-ci: install-dev lint typecheck security test
+ci: lint typecheck security test
 
 # Clean up
 clean:
-	find . -type d -name __pycache__ -exec rm -r {} +
-	find . -type f -name .coverage -delete
-	find . -type f -name .mypy_cache -delete
-	find . -type f -name .ruff_cache -delete
+	@powershell -Command "Get-ChildItem -Path . -Directory -Name __pycache__ -Recurse | ForEach-Object { Remove-Item -LiteralPath $_ -Recurse -Force }"
+	@powershell -Command "Remove-Item -LiteralPath .\.coverage -Force -ErrorAction SilentlyContinue"
+	@powershell -Command "Remove-Item -LiteralPath .\.mypy_cache -Recurse -Force -ErrorAction SilentlyContinue"
+	@powershell -Command "Remove-Item -LiteralPath .\.ruff_cache -Recurse -Force -ErrorAction SilentlyContinue"

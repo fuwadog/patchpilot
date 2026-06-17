@@ -1,4 +1,7 @@
-"""Central configuration for the AI assistant."""
+"""Central configuration for PatchPilot.
+
+Reads from .env.local in the project root directory.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +10,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Find the absolute path to the directory containing this file (the root)
-ROOT_DIR = Path(__file__).resolve().parent
+# Project root is two levels up from this file: src/config.py -> src/ -> project root
+ROOT_DIR = Path(__file__).resolve().parent.parent
 ENV_PATH = ROOT_DIR / ".env.local"
 
 # Load the specific file

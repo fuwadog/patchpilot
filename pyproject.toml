@@ -1,8 +1,29 @@
+[project]
+name = "patchpilot"
+version = "0.1.0"
+description = "Terminal-native AI orchestration engine for code refactoring"
+requires-python = ">=3.10"
+dependencies = [
+    "pypdf>=3.1.0",
+    "python-docx",
+    "openpyxl",
+    "beautifulsoup4",
+    "striprtf",
+    "odfdo",
+    "python-pptx",
+    "python-dotenv",
+    "openai",
+    "httpx",
+    "prompt-toolkit>=3.0",
+    "defusedxml",
+]
+
 [tool.ruff.lint]
 extend-select = ["B", "C", "E", "F", "W", "I"]
 
 [tool.ruff]
 target-version = "py310"
+src = ["src"]
 
 [tool.mypy]
 python_version = "3.10"
@@ -29,3 +50,6 @@ testing_in_production_enabled = false
 [tool.dependency-check]
 project = "patchpilot"
 output_path = "security-report.html"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

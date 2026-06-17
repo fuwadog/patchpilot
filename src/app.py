@@ -1,35 +1,25 @@
-#!/usr/bin/env python3
-"""
-main.py – CLI entry point.
-
-All business logic lives in the modules below. This file only:
-1. Reads config / prompts for API key
-2. Wires components together
-3. Runs the input loop
-"""
+"""Application factory – wires all components together."""
 
 from __future__ import annotations
 
-import os
 import sys
-
-# Make package imports work when running from the project root
-sys.path.insert(0, os.path.dirname(__file__))
 
 from prompt_toolkit import prompt
 
-from cli.autocomplete import setup_autocomplete
-from cli.commands import CommandDispatcher
-from cli.display import Display
-from client.nvidia import NvidiaProvider
-from config import Config
-from context.manager import ContextManager
-from files.manager import FileManager
-from files.operations import PatchManager, SnippetManager
-from session.manager import SessionManager
+from .cli.completer import setup_autocomplete
+from .cli.dispatcher import CommandDispatcher
+from .cli.display import Display
+from .client.nvidia import NvidiaProvider
+from .config import Config
+from .context.manager import ContextManager
+from .files.manager import FileManager
+from .files.patching import PatchManager
+from .files.snippets import SnippetManager
+from .session.manager import SessionManager
 
 
 def resolve_api_key(cfg: Config) -> str:
+    """Resolve API key from config or prompt the user."""
     key = cfg.API_KEY
     if not key:
         try:
@@ -41,6 +31,7 @@ def resolve_api_key(cfg: Config) -> str:
 
 
 def build_app() -> CommandDispatcher:
+    """Build and wire all components into a ready-to-use CommandDispatcher."""
     cfg = Config()
     api_key = resolve_api_key(cfg)
 
@@ -96,6 +87,7 @@ def build_app() -> CommandDispatcher:
 
 
 def main() -> None:
+    """Entry point: build app and run the interactive loop."""
     dispatcher = build_app()
     display = Display()
 
@@ -107,7 +99,6 @@ def main() -> None:
 
     while True:
         try:
-            # Use prompt_toolkit instead of standard input()
             user_input = prompt("\nYou: ", completer=completer)
         except (EOFError, KeyboardInterrupt):
             display.info("\nExiting.")
@@ -116,7 +107,3 @@ def main() -> None:
         should_continue = dispatcher.dispatch(user_input)
         if not should_continue:
             break
-
-
-if __name__ == "__main__":
-    main()

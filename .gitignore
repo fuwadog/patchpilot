@@ -3,6 +3,9 @@
 .env.local
 .env.*
 
+# Keep the example template
+!.env.example
+
 # Python - General
 # The trailing slash ensures only directories are ignored
 __pycache__/
