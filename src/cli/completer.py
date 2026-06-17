@@ -1,3 +1,5 @@
+"""Prompt-toolkit autocomplete for PatchPilot commands."""
+
 from __future__ import annotations
 
 import os

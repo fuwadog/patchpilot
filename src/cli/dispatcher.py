@@ -5,13 +5,14 @@ from __future__ import annotations
 import textwrap
 from typing import ClassVar, Optional
 
-from cli.display import Display
-from context.manager import ContextManager
-from files.manager import FileManager
-from files.operations import PatchManager, SnippetManager
-from session.manager import SessionManager
+from ..cli.display import Display
+from ..context.manager import ContextManager
+from ..files.manager import FileManager
+from ..files.patching import PatchManager
+from ..files.snippets import SnippetManager
+from ..session.manager import SessionManager
 
-HELP_TEXT = textwrap.dedent("""
+HELP_TEXT = textwrap.dedent("""\
 Available commands:
 
   /exit                          Quit the assistant.

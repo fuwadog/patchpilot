@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from cli.display import Display
-from client.base import ModelProvider
-from context.manager import ContextManager
+from ..cli.display import Display
+from ..client.base import ModelProvider
+from ..context.manager import ContextManager
 
 
 class SessionManager:
