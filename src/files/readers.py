@@ -217,7 +217,7 @@ class FileReaders:
             text_content = []
 
             for slide_num, slide in enumerate(prs.slides, 1):
-                text_content.append(f"=== Slide {slide_num} ===)")
+                text_content.append(f"=== Slide {slide_num} ===")
                 for shape in slide.shapes:
                     if hasattr(shape, "text") and shape.text.strip():
                         text_content.append(shape.text)

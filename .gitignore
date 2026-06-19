@@ -60,15 +60,18 @@ coverage.xml
 *.swp
 *.swo
 
-# Local backups and temporary files
-backups/
-*.bak
-*.tmp
-temp/
-
-# Node dependencies
-node_modules/
-
 # OS files
 .DS_Store
 Thumbs.db
+
+# PatchPilot - SQLite databases
+*.db
+*.db-wal
+*.db-shm
+~/.patchpilot/
+
+# PatchPilot - Backup files
+backups/
+
+# PatchPilot - Security reports
+security-report.html

@@ -2,15 +2,28 @@
 
 from __future__ import annotations
 
+import re
 import textwrap
-from typing import ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
-from ..cli.display import Display
 from ..context.manager import ContextManager
 from ..files.manager import FileManager
 from ..files.patching import PatchManager
 from ..files.snippets import SnippetManager
 from ..session.manager import SessionManager
+from ..session.store import SessionStore
+
+_RICH_TAG_RE = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9 _-]*\]")
+
+
+def _strip_rich_markup(text: str) -> str:
+    """Remove Rich console markup tags that Textual Markdown cannot render.
+
+    Rich tags like [bold], [/italic], [bright_red] leak as literal text
+    when passed through Markdown widgets. This strips them cleanly.
+    """
+    return _RICH_TAG_RE.sub("", text)
+
 
 HELP_TEXT = textwrap.dedent("""\
 Available commands:
@@ -42,6 +55,10 @@ Available commands:
   /snippet list                  List all saved snippet names.
   /snippet del <name>            Delete a snippet.
 
+  --- Sessions ---
+  /history                       Show recent sessions.
+  /resume [id]                   Resume a previous session by ID prefix.
+
   --- Info ---
   /tokens                        Show estimated token usage.
   /context-info                  Detailed token and file stats.
@@ -61,12 +78,15 @@ class CommandDispatcher:
         "/folder": "_cmd_folder",
         "/show": "_cmd_show",
         "/unload": "_cmd_unload",
+        "/unload-all": "_cmd_unload_all",
+        "/unload-folder": "_cmd_unload_folder",
+        "/unload-pattern": "_cmd_unload_pattern",
         "/pin": "_cmd_pin",
         "/unpin": "_cmd_unpin",
-        "/fix": "_cmd_fix",
-        "/refactor": "_cmd_refactor",
-        "/patch": "_cmd_patch",
+        "/context-info": "_cmd_context_info",
         "/snippet": "_cmd_snippet",
+        "/history": "_cmd_history",
+        "/resume": "_cmd_resume",
     }
 
     def __init__(
@@ -76,27 +96,29 @@ class CommandDispatcher:
         context: ContextManager,
         patch: PatchManager,
         snippets: SnippetManager,
-        display: Display,
-        max_file_chars: int,
+        display: Any = None,  # kept for backward compatibility
+        max_file_chars: int = 10000,
+        store: Optional[SessionStore] = None,
+        session_id: str = "",
     ):
         self._session = session
         self._files = files
         self._ctx = context
         self._patch = patch
         self._snippets = snippets
-        self._display = display
+        self._display = display  # no longer used for output
         self._max_file_chars = max_file_chars
         self._last_response: Optional[str] = None
+        self._store = store
+        self._session_id = session_id
+        self.exit_requested: bool = False
 
     # ------------------------------------------------------------------
-    # Main entry point
+    # Main entry points
     # ------------------------------------------------------------------
 
-    def dispatch(self, raw: str) -> bool:
-        """
-        Handle one line of user input.
-        Returns False when the session should end.
-        """
+    def dispatch(self, raw: str) -> bool:  # noqa: C901
+        """Sync dispatch for backward compatibility. Returns False to exit."""
         raw = raw.rstrip()
         if not raw:
             return True
@@ -105,56 +127,395 @@ class CommandDispatcher:
         cmd = parts[0].lower()
 
         if cmd == "/exit":
+            self.exit_requested = True
+            result = self._cmd_exit()
+            result = _strip_rich_markup(result)
+            print(result)
             return False
 
-        if cmd in ("/unload-all", "/unload-folder", "/unload-pattern"):
-            if cmd == "/unload-all":
-                self._cmd_unload_all(parts)
-            elif cmd == "/unload-folder":
-                self._cmd_unload_folder(parts)
-            else:
-                self._cmd_unload_pattern(parts)
-            return True
-
-        if cmd == "/context-info":
-            self._cmd_context_info()
-            return True
+        args_str = " ".join(parts[1:]) if len(parts) > 1 else ""
 
         if cmd in ("/fix", "/refactor", "/patch"):
-            self._cmd_code_op(cmd, raw)
-            return True
+            result = self._cmd_code_op(cmd, raw)
+            result = _strip_rich_markup(result)
+            if result:
+                print(result)
+        elif cmd in ("/history", "/resume"):
+            print(f"Use '{cmd}' in the Textual app (requires async DB).")
+        elif cmd in self.COMMAND_HANDLERS:
+            handler = getattr(self, self.COMMAND_HANDLERS[cmd])
+            result = handler(args_str) if args_str else handler()
+            result = _strip_rich_markup(result)
+            if result:
+                print(result)
+        else:
+            # Chat message — send to AI
+            response = self._session.send(raw, record_in_history=True)
+            if response:
+                print(_strip_rich_markup(response))
+            self._last_response = response
 
-        handler = self.COMMAND_HANDLERS.get(cmd)
-        if handler:
-            getattr(self, handler)(parts)
-            return True
-
-        self._display.assistant_header()
-        response = self._session.send(raw, record_in_history=True)
-        self._last_response = response
         return True
 
-    def _cmd_exit(self, parts: list[str]) -> None:
-        pass
+    async def dispatch_async(self, user_input: str) -> str:  # noqa: C901
+        """Async dispatch for Textual TUI. Returns response string."""
+        if not user_input.strip():
+            return ""
 
-    def _cmd_help(self, parts: list[str]) -> None:
-        self._display.info(HELP_TEXT)
+        parts = user_input.strip().split(maxsplit=1)
+        cmd = parts[0].lower()
+        args = parts[1] if len(parts) > 1 else ""
 
-    def _cmd_reset(self, parts: list[str]) -> None:
+        # Special cases requiring async or side effects
+        if cmd in ("/fix", "/refactor", "/patch"):
+            result = await self._cmd_code_op_async(cmd, args)
+        elif cmd == "/history":
+            result = await self._cmd_history_async()
+        elif cmd == "/resume":
+            result = await self._cmd_resume_async(args)
+        elif cmd == "/exit":
+            self.exit_requested = True
+            result = self._cmd_exit()
+        elif cmd in self.COMMAND_HANDLERS:
+            handler = getattr(self, self.COMMAND_HANDLERS[cmd])
+            result = handler(args) if args else handler()
+        else:
+            # Chat message — send to AI via async stream
+            if self._store and self._session_id:
+                await self._store.add_message(self._session_id, "user", user_input)
+            result = await self._collect_async_response(user_input)
+            result = _strip_rich_markup(result)
+            if self._store and self._session_id:
+                await self._store.add_message(self._session_id, "assistant", result)
+            return result
+
+        # Sanitize Rich markup tags from response
+        if result:
+            result = _strip_rich_markup(result)
+
+        # Persist command to DB
+        if self._store and self._session_id:
+            await self._store.add_message(self._session_id, "user", user_input)
+            await self._store.add_message(self._session_id, "assistant", result)
+        return result
+
+    async def _collect_async_response(self, user_input: str) -> str:
+        """Send a chat message via async streaming and collect the full response."""
+        full_response = ""
+        async for chunk in self._session.stream_async(user_input):
+            if chunk.content:
+                full_response += chunk.content
+        if full_response:
+            self._last_response = full_response
+        return full_response
+
+    # ------------------------------------------------------------------
+    # Command implementations (all return str, accept optional args)
+    # ------------------------------------------------------------------
+
+    def _cmd_exit(self, args: str = "") -> str:
+        return "Goodbye!"
+
+    def _cmd_help(self, args: str = "") -> str:
+        return HELP_TEXT
+
+    def _cmd_reset(self, args: str = "") -> str:
         self._session.reset()
-        self._display.info("Conversation history cleared (project files retained).")
+        return "Conversation history cleared (project files retained)."
 
-    def _cmd_tokens(self, parts: list[str]) -> None:
+    def _cmd_tokens(self, args: str = "") -> str:
         est = self._ctx.estimated_total_tokens()
-        self._display.info(f"Estimated context tokens: ~{est}")
+        return f"Estimated context tokens: ~{est}"
 
-    def _cmd_list(self, parts: list[str]) -> None:
+    def _cmd_list(self, args: str = "") -> str:
         paths = self._files.loaded_paths()
         if not paths:
-            self._display.info("No files loaded.")
-        else:
-            for p in paths:
-                self._display.info(p)
+            return "No files loaded."
+        return "\n".join(paths)
+
+    def _cmd_file(self, args: str = "") -> str:
+        if not args.strip():
+            return "Usage: /file <path>"
+        path = args.strip()
+        ok, err = self._files.load(path)
+        if not ok:
+            return f"Failed to load: {err}"
+        return f"Loaded: {path}"
+
+    def _cmd_folder(self, args: str = "") -> str:
+        folder = args.strip() or "."
+        import os
+
+        if not os.path.isdir(folder):
+            return f"Folder not found: {folder}"
+        count, errors = self._files.load_folder(folder)
+        lines = [f"  Skipped – {e}" for e in errors]
+        lines.append(f"Loaded {count} file(s) from {folder}.")
+        return "\n".join(lines)
+
+    def _cmd_show(self, args: str = "") -> str:
+        if not args.strip():
+            return "Usage: /show <path>"
+        path = args.strip()
+        content = self._files.get_content(path)
+        if content is None:
+            return "File not loaded. Use /file to load it first."
+        max_chars = self._max_file_chars * 4
+        display_content = (
+            content
+            if len(content) <= max_chars
+            else content[:max_chars] + "\n…[truncated]"
+        )
+        return f"**{path}**\n\n```\n{display_content}\n```"
+
+    def _cmd_unload(self, args: str = "") -> str:
+        if not args.strip():
+            return "Usage: /unload <path>"
+        path = args.strip()
+        if self._files.unload(path):
+            return f"Unloaded: {path}"
+        return f"Skipped (likely pinned): {path}"
+
+    def _cmd_unload_all(self, args: str = "") -> str:
+        force = "--force" in args.split()
+        count = self._files.unload_all(keep_pinned=not force)
+        return f"Unloaded {count} files."
+
+    def _cmd_unload_folder(self, args: str = "") -> str:
+        if not args.strip():
+            return "Usage: /unload-folder <path>"
+        path = args.strip()
+        count = self._files.unload_folder(path)
+        return f"Unloaded {count} files from {path}."
+
+    def _cmd_unload_pattern(self, args: str = "") -> str:
+        if not args.strip():
+            return "Usage: /unload-pattern <glob>"
+        pattern = args.strip()
+        count = self._files.unload_pattern(pattern)
+        return f"Unloaded {count} files matching {pattern}."
+
+    def _cmd_pin(self, args: str = "") -> str:
+        if not args.strip():
+            return "Usage: /pin <path>"
+        path = args.strip()
+        if self._ctx.pin_file(path):
+            return f"Pinned: {path}"
+        return f"Cannot pin {path}. Is it loaded?"
+
+    def _cmd_unpin(self, args: str = "") -> str:
+        if not args.strip():
+            return "Usage: /unpin <path>"
+        path = args.strip()
+        self._ctx.unpin_file(path)
+        return f"Unpinned: {path}"
+
+    def _cmd_context_info(self, args: str = "") -> str:
+        stats = self._ctx.get_stats()
+        lines = [
+            f"**Total tokens:** ~{stats['total_tokens']} / {stats['max_total']}",
+            f"**Loaded files:** {stats['file_count']} ({stats['pinned_count']} pinned)",
+        ]
+        if stats["files"]:
+            lines.append("")
+            lines.append("| File | Tokens | Pinned |")
+            lines.append("|------|-------:|--------|")
+            for f in stats["files"]:
+                pinned = "Yes" if f.get("pinned") else "No"
+                path = f.get("path", "")
+                # Truncate long paths for table display
+                if len(path) > 45:
+                    path = "…" + path[-44:]
+                lines.append(f"| {path} | {f.get('tokens', '')} | {pinned} |")
+        return "\n".join(lines)
+
+    def _cmd_snippet(self, args: str = "") -> str:
+        parts = args.split(None, 1)
+        sub = parts[0].lower() if parts else ""
+        rest = parts[1] if len(parts) > 1 else ""
+
+        if sub == "list":
+            names = self._snippets.list_names()
+            return "\n".join(names) if names else "No snippets saved."
+        if sub == "show" and rest:
+            block = self._snippets.as_context_block(rest)
+            return block if block else f"Snippet '{rest}' not found."
+        if sub == "del" and rest:
+            deleted = self._snippets.delete(rest)
+            return f"Deleted '{rest}'." if deleted else "Not found."
+        if sub == "save" and rest:
+            name = rest
+            if not self._last_response:
+                return "No assistant response to save from."
+            code = self._patch.extract_code_block(self._last_response)
+            if not code:
+                return "No code block found in last response."
+            self._snippets.save(name, code)
+            return f"Snippet '{name}' saved."
+        return "Usage: /snippet save|show|list|del [name]"
+
+    def _cmd_history(self, args: str = "") -> str:
+        """Sync stub — real implementation is async via dispatch_async."""
+        return "Use /history in the Textual app (requires async DB)."
+
+    def _cmd_resume(self, args: str = "") -> str:
+        """Sync stub — real implementation is async via dispatch_async."""
+        if not args.strip():
+            return "Use /resume [id] in the Textual app (requires async DB)."
+        return "Use /resume in the Textual app (requires async DB)."
+
+    # ------------------------------------------------------------------
+    # Async command implementations (DB-backed)
+    # ------------------------------------------------------------------
+
+    async def _cmd_history_async(self) -> str:
+        """Show recent sessions from the DB."""
+        if not self._store:
+            return "Session store not available."
+        sessions = await self._store.list_sessions()
+        if not sessions:
+            return "No saved sessions."
+        lines = ["Recent sessions:"]
+        for s in sessions:
+            lines.append(f"  [{s.id[:8]}] {s.title} ({s.message_count} messages)")
+        return "\n".join(lines)
+
+    async def _cmd_resume_async(self, args: str = "") -> str:
+        """Resume a previous session from the DB."""
+        if not self._store:
+            return "Session store not available."
+
+        if not args.strip():
+            sessions = await self._store.list_sessions(limit=5)
+            if not sessions:
+                return "No sessions to resume."
+            lines = ["Recent sessions (use /resume <id> to resume):"]
+            for s in sessions:
+                lines.append(f"  [{s.id[:8]}] {s.title}")
+            return "\n".join(lines)
+
+        session_id_prefix = args.strip()
+        sessions = await self._store.list_sessions(limit=100)
+        match = next((s for s in sessions if s.id.startswith(session_id_prefix)), None)
+        if not match:
+            return f"No session found matching '{session_id_prefix}'."
+
+        messages = await self._store.get_session_messages(match.id)
+        self._ctx.reset_convo()
+        for msg in messages:
+            if msg["role"] == "user":
+                self._ctx.add_user(msg["content"])
+            elif msg["role"] == "assistant":
+                self._ctx.add_assistant(msg["content"])
+        self._session_id = match.id
+        return f"Resumed session: {match.title} ({len(messages)} messages)"
+
+    # ------------------------------------------------------------------
+    # Code operations (sync variant)
+    # ------------------------------------------------------------------
+
+    def _cmd_code_op(self, cmd: str, raw: str) -> str:
+        """Shared sync logic for /fix, /refactor, /patch. Returns response."""
+        tokens = raw.split(None, 2)  # [cmd, path, instructions?]
+        if len(tokens) < 2:
+            return f"Usage: {cmd} <path> [instructions]"
+        path = tokens[1]
+        instructions = tokens[2].strip() if len(tokens) > 2 else ""
+
+        if not self._files.is_loaded(path):
+            ok, err = self._files.load(path)
+            if not ok:
+                return f"Cannot load file: {err}"
+
+        if not instructions:
+            return f"Usage: {cmd} <path> [instructions]"
+
+        content = self._files.get_content(path) or ""
+        prompt = self._build_code_prompt(cmd, path, content, instructions)
+
+        # Record user intent, then send the structured prompt (not double-recorded)
+        self._ctx.add_user(f"{cmd} {path}: {instructions}")
+        response = self._session.send(prompt, record_in_history=False)
+        if not response:
+            return "No response from assistant."
+        self._last_response = response
+
+        if cmd == "/patch":
+            new_code = self._patch.extract_code_block(response)
+            if new_code:
+                ok, msg = self._patch.apply(path, new_code, confirm=False)
+                if ok:
+                    self._files.load(path)
+                return f"{response}\n\n---\n{msg}"
+            return response + "\n\n---\nNo code block found in response to apply."
+
+        return response
+
+    async def _cmd_code_op_async(self, cmd: str, args: str) -> str:  # noqa: C901
+        """Shared async logic for /fix, /refactor, /patch. Returns response."""
+        parts = args.split(None, 1)
+        if not parts:
+            return f"Usage: {cmd} <path> [instructions]"
+        path = parts[0]
+        instructions = parts[1].strip() if len(parts) > 1 else ""
+
+        if not self._files.is_loaded(path):
+            ok, err = self._files.load(path)
+            if not ok:
+                return f"Cannot load file: {err}"
+
+        if not instructions:
+            return f"Usage: {cmd} <path> [instructions]"
+
+        content = self._files.get_content(path) or ""
+        prompt = self._build_code_prompt(cmd, path, content, instructions)
+
+        # Record user intent, then stream the structured prompt
+        self._ctx.add_user(f"{cmd} {path}: {instructions}")
+
+        full_response = ""
+        async for chunk in self._session.stream_async(prompt):
+            if chunk.content:
+                full_response += chunk.content
+
+        if not full_response:
+            return "No response from assistant."
+        self._last_response = full_response
+
+        if cmd == "/patch":
+            new_code = self._patch.extract_code_block(full_response)
+            if new_code:
+                ok, msg = self._patch.apply(path, new_code, confirm=False)
+                if ok:
+                    self._files.load(path)
+                return f"{full_response}\n\n---\n{msg}"
+            return full_response + "\n\n---\nNo code block found in response to apply."
+
+        return full_response
+
+    @staticmethod
+    def _build_code_prompt(cmd: str, path: str, content: str, instructions: str) -> str:
+        if cmd == "/fix":
+            return (
+                f"Fix bugs or errors in this file. Follow these instructions: "
+                f"{instructions}\n\nFile: {path}\n{content}\n\n"
+                "Provide a clear explanation of the changes and a complete "
+                "replacement file in a single fenced code block."
+            )
+        if cmd == "/refactor":
+            return (
+                f"Refactor this file to improve readability, maintainability, "
+                f"or performance according to: {instructions}\n\n"
+                f"File: {path}\n{content}\n\n"
+                "Provide a short summary and the full refactored file in a "
+                "single fenced code block."
+            )
+        # /patch
+        return (
+            f"Produce a patch (complete replacement) for this file according "
+            f"to: {instructions}\n\nFile: {path}\n{content}\n\n"
+            "Provide only the replacement file in a single fenced code block."
+        )
 
     # ------------------------------------------------------------------
     # State Getters for Autocomplete
@@ -182,6 +543,8 @@ class CommandDispatcher:
             "/refactor",
             "/patch",
             "/snippet",
+            "/history",
+            "/resume",
         ]
 
     def get_loaded_paths(self) -> list[str]:
@@ -191,207 +554,3 @@ class CommandDispatcher:
     def get_snippet_names(self) -> list[str]:
         """Return list of saved snippet names."""
         return self._snippets.list_names()
-
-    # ------------------------------------------------------------------
-    # Command implementations
-    # ------------------------------------------------------------------
-
-    def _cmd_file(self, parts: list[str]) -> None:
-        if len(parts) < 2 or not parts[1].strip():
-            self._display.info("Usage: /file <path>")
-            return
-        path = " ".join(parts[1:])
-        ok, err = self._files.load(path)
-        if not ok:
-            self._display.error(f"Failed to load: {err}")
-        else:
-            self._display.info(f"Loaded: {path}")
-
-    def _cmd_folder(self, parts: list[str]) -> None:
-        folder = parts[1] if len(parts) > 1 else "."
-        import os
-
-        if not os.path.isdir(folder):
-            self._display.error(f"Folder not found: {folder}")
-            return
-        count, errors = self._files.load_folder(folder)
-        for e in errors:
-            self._display.info(f"  Skipped – {e}")
-        self._display.info(f"Loaded {count} file(s) from {folder}.")
-
-    def _cmd_show(self, parts: list[str]) -> None:
-        if len(parts) < 2:
-            self._display.info("Usage: /show <path>")
-            return
-        path = " ".join(parts[1:])
-        content = self._files.get_content(path)
-        if content is None:
-            self._display.info("File not loaded. Use /file to load it first.")
-            return
-        # truncate for display
-        max_chars = self._max_file_chars * 4
-        display_content = (
-            content
-            if len(content) <= max_chars
-            else content[:max_chars] + "\n…[truncated]"
-        )
-        self._display.info(f"\n--- {path} ---\n")
-        self._display.info(display_content)
-        self._display.info("\n--- end ---")
-
-    def _cmd_unload(self, parts: list[str]) -> None:
-        if len(parts) < 2:
-            self._display.info("Usage: /unload <path>")
-            return
-        path = " ".join(parts[1:])
-        if self._files.unload(path):
-            self._display.success(f"Unloaded: {path}")
-        else:
-            self._display.warning(f"Skipped (likely pinned): {path}")
-
-    def _cmd_unload_all(self, parts: list[str]) -> None:
-        force = "--force" in parts
-        count = self._files.unload_all(keep_pinned=not force)
-        self._display.success(f"Unloaded {count} files.")
-
-    def _cmd_unload_folder(self, parts: list[str]) -> None:
-        if len(parts) < 2:
-            self._display.info("Usage: /unload-folder <path>")
-            return
-        path = " ".join(parts[1:])
-        count = self._files.unload_folder(path)
-        self._display.success(f"Unloaded {count} files from {path}.")
-
-    def _cmd_unload_pattern(self, parts: list[str]) -> None:
-        if len(parts) < 2:
-            self._display.info("Usage: /unload-pattern <glob>")
-            return
-        pattern = " ".join(parts[1:])
-        count = self._files.unload_pattern(pattern)
-        self._display.success(f"Unloaded {count} files matching {pattern}.")
-
-    def _cmd_pin(self, parts: list[str]) -> None:
-        if len(parts) < 2:
-            self._display.info("Usage: /pin <path>")
-            return
-        path = " ".join(parts[1:])
-        if self._ctx.pin_file(path):
-            self._display.success(f"Pinned: {path}")
-        else:
-            self._display.error(f"Cannot pin {path}. Is it loaded?")
-
-    def _cmd_unpin(self, parts: list[str]) -> None:
-        if len(parts) < 2:
-            self._display.info("Usage: /unpin <path>")
-            return
-        path = " ".join(parts[1:])
-        self._ctx.unpin_file(path)
-        self._display.success(f"Unpinned: {path}")
-
-    def _cmd_context_info(self) -> None:
-        stats = self._ctx.get_stats()
-        self._display.info(
-            f"Total tokens: {stats['total_tokens']} / {stats['max_total']}"
-        )
-        self._display.info(
-            f"Loaded files: {stats['file_count']} ({stats['pinned_count']} pinned)"
-        )
-        self._display.newline()
-
-        headers = ["File", "Tokens", "Pinned"]
-        rows = [
-            [f.get("path"), str(f.get("tokens")), "Yes" if f.get("pinned") else "No"]
-            for f in stats["files"]
-        ]
-        self._display.table(headers, rows)
-
-    def _cmd_code_op(self, cmd: str, raw: str) -> None:
-        """Shared logic for /fix, /refactor, /patch."""
-        tokens = raw.split(None, 2)  # [cmd, path, instructions?]
-        if len(tokens) < 2:
-            self._display.info(f"Usage: {cmd} <path> [instructions]")
-            return
-        path = tokens[1]
-        instructions = tokens[2].strip() if len(tokens) > 2 else ""
-
-        if not self._files.is_loaded(path):
-            ok, err = self._files.load(path)
-            if not ok:
-                self._display.error(f"Cannot load file: {err}")
-                return
-
-        if not instructions:
-            try:
-                instructions = input("Instructions (one line): ").strip()
-            except (EOFError, KeyboardInterrupt):
-                instructions = ""
-
-        content = self._files.get_content(path) or ""
-        prompt = self._build_code_prompt(cmd, path, content, instructions)
-
-        # Record user intent in history, then send the structured prompt
-        self._ctx.add_user(f"{cmd} {path}: {instructions}")
-        self._display.assistant_header()
-        response = self._session.send(prompt, record_in_history=False)
-        self._last_response = response
-
-        # For /patch, offer to extract and apply
-        if cmd == "/patch" and response:
-            new_code = self._patch.extract_code_block(response)
-            if new_code:
-                ok, msg = self._patch.apply(path, new_code, confirm=True)
-                self._display.info(msg)
-                if ok:
-                    # Refresh the in-memory store
-                    self._files.load(path)
-            else:
-                self._display.info("No code block found in response to apply.")
-
-    @staticmethod
-    def _build_code_prompt(cmd: str, path: str, content: str, instructions: str) -> str:
-        if cmd == "/fix":
-            return (
-                f"Fix bugs or errors in this file. Follow these instructions: "
-                f"{instructions}\n\nFile: {path}\n{content}\n\n"
-                "Provide a clear explanation of the changes and a complete "
-                "replacement file in a single fenced code block."
-            )
-        elif cmd == "/refactor":
-            return (
-                f"Refactor this file to improve readability, maintainability, "
-                f"or performance according to: {instructions}\n\n"
-                f"File: {path}\n{content}\n\n"
-                "Provide a short summary and the full refactored file in a "
-                "single fenced code block."
-            )
-        else:  # /patch
-            return (
-                f"Produce a patch (complete replacement) for this file according "
-                f"to: {instructions}\n\nFile: {path}\n{content}\n\n"
-                "Provide only the replacement file in a single fenced code block."
-            )
-
-    def _cmd_snippet(self, parts: list[str]) -> None:
-        sub = parts[1].lower() if len(parts) > 1 else ""
-        if sub == "list":
-            names = self._snippets.list_names()
-            self._display.info("\n".join(names) if names else "No snippets saved.")
-        elif sub == "show" and len(parts) > 2:
-            block = self._snippets.as_context_block(parts[2])
-            self._display.info(block if block else f"Snippet '{parts[2]}' not found.")
-        elif sub == "del" and len(parts) > 2:
-            deleted = self._snippets.delete(parts[2])
-            self._display.info(f"Deleted '{parts[2]}'." if deleted else "Not found.")
-        elif sub == "save" and len(parts) > 2:
-            name = parts[2]
-            if not self._last_response:
-                self._display.info("No assistant response to save from.")
-                return
-            code = self._patch.extract_code_block(self._last_response)
-            if not code:
-                self._display.info("No code block found in last response.")
-                return
-            self._snippets.save(name, code)
-            self._display.info(f"Snippet '{name}' saved.")
-        else:
-            self._display.info("Usage: /snippet save|show|list|del [name]")

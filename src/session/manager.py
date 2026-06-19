@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, AsyncIterator, Optional
 
-from ..cli.display import Display
-from ..client.base import ModelProvider
+from ..client.base import ModelProvider, StreamChunk
 from ..context.manager import ContextManager
+
+
+class _NullDisplay:
+    """No-op display helper used when display=None (Textual mode).
+
+    Swallows display calls instead of requiring if-self._display guards
+    everywhere, which keeps McCabe complexity in check.
+    """
+
+    def __getattr__(self, _: str) -> object:
+        return lambda *args: None
 
 
 class SessionManager:
@@ -21,7 +31,7 @@ class SessionManager:
         self,
         provider: ModelProvider,
         context: ContextManager,
-        display: Display,
+        display: Any,
         temperature: float,
         max_tokens: int,
     ):
@@ -48,27 +58,48 @@ class SessionManager:
             ephemeral_user_content=None if record_in_history else user_message
         )
 
+        disp: Any = self._display if self._display else _NullDisplay()
         full_response = ""
+
         try:
             for chunk in self._provider.stream(
                 messages, self._temperature, self._max_tokens
             ):
                 if chunk.reasoning:
-                    self._display.reasoning(chunk.reasoning)
+                    disp.reasoning(chunk.reasoning)
                 if chunk.content:
-                    self._display.stream(chunk.content)
+                    disp.stream(chunk.content)
                     full_response += chunk.content
-        except KeyboardInterrupt:
-            self._display.info("\n[Stream interrupted by user]")
-        except RuntimeError as e:
-            self._display.error(str(e))
+        except (KeyboardInterrupt, RuntimeError) as e:
+            if not self._display:
+                raise
+            if isinstance(e, KeyboardInterrupt):
+                disp.info("\n[Stream interrupted by user]")
+            else:
+                disp.error(str(e))
 
-        self._display.newline()
+        disp.newline()
 
         if full_response:
             self._ctx.add_assistant(full_response)
 
         return full_response or None
+
+    async def stream_async(self, user_input: str) -> AsyncIterator[StreamChunk]:
+        """Async streaming for Textual app. Yields chunks without Display dependency."""
+        self._ctx.add_user(user_input)
+        messages = self._ctx.build_messages()
+
+        full_response = ""
+        async for chunk in self._provider.async_stream(
+            messages, self._temperature, self._max_tokens
+        ):
+            if chunk.content:
+                full_response += chunk.content
+            yield chunk
+
+        if full_response:
+            self._ctx.add_assistant(full_response)
 
     def reset(self) -> None:
         self._ctx.reset_convo()

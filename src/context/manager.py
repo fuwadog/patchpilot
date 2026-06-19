@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TypedDict
 
 
 @dataclass
@@ -18,6 +18,21 @@ class Message:
 
     def to_dict(self) -> dict:
         return {"role": self.role, "content": self.content}
+
+
+class FileStats(TypedDict):
+    path: str
+    tokens: int
+    pinned: bool
+
+
+class ContextStats(TypedDict):
+    total_tokens: int
+    max_total: int
+    file_count: int
+    pinned_count: int
+    convo_messages: int
+    files: list[FileStats]
 
 
 class ContextManager:
@@ -187,25 +202,40 @@ class ContextManager:
     def is_pinned(self, path: str) -> bool:
         return os.path.abspath(path) in self._pinned_files
 
-    def get_stats(self) -> dict:
+    @property
+    def file_tokens(self) -> int:
+        """Total tokens used by loaded files."""
+        return sum(m.token_estimate() for m in self._file_messages)
+
+    @property
+    def convo_tokens(self) -> int:
+        """Total tokens used by conversation messages."""
+        return sum(m.token_estimate() for m in self._convo_messages)
+
+    @property
+    def max_file_tokens(self) -> int:
+        """Maximum tokens allowed for files."""
+        return self._max_file_tokens
+
+    def get_stats(self) -> ContextStats:
         file_stats = []
         for m in self._file_messages:
             tag = "[PROJECT_FILE] "
             if m.content.startswith(tag):
                 path = m.content.split("\n", 1)[0][len(tag) :]
                 file_stats.append(
-                    {
-                        "path": path,
-                        "tokens": m.token_estimate(),
-                        "pinned": path in self._pinned_files,
-                    }
+                    FileStats(
+                        path=path,
+                        tokens=m.token_estimate(),
+                        pinned=path in self._pinned_files,
+                    )
                 )
 
-        return {
-            "total_tokens": self.estimated_total_tokens(),
-            "max_total": self._max_total,
-            "file_count": len(self._file_messages),
-            "pinned_count": len(self._pinned_files),
-            "convo_messages": len(self._convo_messages),
-            "files": file_stats,
-        }
+        return ContextStats(
+            total_tokens=self.estimated_total_tokens(),
+            max_total=self._max_total,
+            file_count=len(self._file_messages),
+            pinned_count=len(self._pinned_files),
+            convo_messages=len(self._convo_messages),
+            files=file_stats,
+        )

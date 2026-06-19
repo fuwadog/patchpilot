@@ -5,6 +5,7 @@ Reads from .env.local in the project root directory.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -23,14 +24,38 @@ class Config:
     BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://integrate.api.nvidia.com/v1")
     API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     MODEL: str = os.getenv("AI_MODEL", "z-ai/glm4.7")
-    TEMPERATURE: float = float(os.getenv("AI_TEMPERATURE", "0.4"))
+
+    try:
+        TEMPERATURE: float = float(os.getenv("AI_TEMPERATURE", "0.4"))
+    except (ValueError, TypeError):
+        TEMPERATURE: float = 0.4
 
     # File loading settings
-    MAX_FILES: int = int(os.getenv("MAX_FILES", "12"))
-    MAX_FILE_TOKENS: int = int(os.getenv("MAX_FILE_TOKENS", "1500"))
-    MAX_TOTAL_TOKENS: int = int(os.getenv("MAX_TOTAL_TOKENS", "4500"))
-    MAX_CONVO_MESSAGES: int = int(os.getenv("MAX_CONVO_MESSAGES", "40"))
-    MAX_RESPONSE_TOKENS: int = int(os.getenv("MAX_RESPONSE_TOKENS", "4096"))
+    try:
+        MAX_FILES: int = int(os.getenv("MAX_FILES", "12"))
+    except (ValueError, TypeError):
+        MAX_FILES: int = 12
+
+    try:
+        MAX_FILE_TOKENS: int = int(os.getenv("MAX_FILE_TOKENS", "1500"))
+    except (ValueError, TypeError):
+        MAX_FILE_TOKENS: int = 1500
+
+    try:
+        MAX_TOTAL_TOKENS: int = int(os.getenv("MAX_TOTAL_TOKENS", "4500"))
+    except (ValueError, TypeError):
+        MAX_TOTAL_TOKENS: int = 4500
+
+    try:
+        MAX_CONVO_MESSAGES: int = int(os.getenv("MAX_CONVO_MESSAGES", "40"))
+    except (ValueError, TypeError):
+        MAX_CONVO_MESSAGES: int = 40
+
+    try:
+        MAX_RESPONSE_TOKENS: int = int(os.getenv("MAX_RESPONSE_TOKENS", "4096"))
+    except (ValueError, TypeError):
+        MAX_RESPONSE_TOKENS: int = 4096
+
     DEFAULT_EXTENSIONS: list[str] = [
         "*.ts",
         "*.js",
@@ -48,8 +73,16 @@ class Config:
     )
     BACKUP_ON_WRITE: bool = os.getenv("BACKUP_ON_WRITE", "true").lower() == "true"
     DIFF_PREVIEW: bool = os.getenv("DIFF_PREVIEW", "true").lower() == "true"
-    MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "3"))
-    RETRY_DELAY: float = float(os.getenv("RETRY_DELAY", "1.5"))
+
+    try:
+        MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "3"))
+    except (ValueError, TypeError):
+        MAX_RETRIES: int = 3
+
+    try:
+        RETRY_DELAY: float = float(os.getenv("RETRY_DELAY", "1.5"))
+    except (ValueError, TypeError):
+        RETRY_DELAY: float = 1.5
 
     SYSTEM_PROMPT: str = (
         "You are a helpful AI assistant that can read, understand, and edit "
@@ -57,7 +90,14 @@ class Config:
         "explain issues, propose edits, "
     )
 
+    # Database
+    DB_PATH: str = os.getenv(
+        "PATCHPILOT_DB_PATH",
+        str(Path.home() / ".patchpilot" / "sessions.db"),
+    )
 
-# Quick check
+
+logger = logging.getLogger(__name__)
+
 if not Config.API_KEY:
-    print(f"WARNING: API_KEY not found at {ENV_PATH}")
+    logger.warning("API_KEY not found at %s", ENV_PATH)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Iterator
+from typing import AsyncIterator, Iterator
 
 
 class StreamChunk:
@@ -25,6 +25,16 @@ class ModelProvider(ABC):
         max_tokens: int,
     ) -> Iterator[StreamChunk]:
         """Yield StreamChunk objects for each token as it arrives."""
+        ...
+
+    @abstractmethod
+    def async_stream(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+    ) -> AsyncIterator[StreamChunk]:
+        """Async variant of stream for use with Textual Workers."""
         ...
 
     @property
